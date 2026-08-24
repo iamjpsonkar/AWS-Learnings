@@ -74,8 +74,17 @@ else
 fi
 
 # curl and jq (used in scripts)
-command -v curl &>/dev/null && pass "curl" || fail "curl not found"
-command -v jq &>/dev/null && pass "jq" || warn "jq not found (optional but recommended)"
+if command -v curl &>/dev/null; then
+    pass "curl"
+else
+    fail "curl not found"
+fi
+
+if command -v jq &>/dev/null; then
+    pass "jq"
+else
+    warn "jq not found (optional but recommended)"
+fi
 
 # ─────────────────────────────────────────────
 # Optional tools (warn, don't fail)

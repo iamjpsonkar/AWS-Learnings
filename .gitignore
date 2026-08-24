@@ -51,6 +51,7 @@ credentials
 *.zip
 *.tar.gz
 *.tar.bz2
+/docker/kind
 
 # Log files
 *.log

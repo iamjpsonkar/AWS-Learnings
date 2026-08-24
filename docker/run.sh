@@ -569,24 +569,24 @@ cmd_clean() {
   dc down --remove-orphans --volumes 2>/dev/null || true
 
   log_step "Removing any remaining containers with project label..."
-  local containers
-  containers=$(docker ps -a --filter "label=${LABEL_FILTER}" -q 2>/dev/null || true)
-  if [[ -n "$containers" ]]; then
-    run_cmd docker rm -f $containers
+  local -a containers=()
+  mapfile -t containers < <(docker ps -a --filter "label=${LABEL_FILTER}" -q 2>/dev/null || true)
+  if (( ${#containers[@]} > 0 )); then
+    run_cmd docker rm -f "${containers[@]}"
   fi
 
   log_step "Removing project networks..."
-  local networks
-  networks=$(docker network ls --filter "label=${LABEL_FILTER}" -q 2>/dev/null || true)
-  if [[ -n "$networks" ]]; then
-    run_cmd docker network rm $networks 2>/dev/null || true
+  local -a networks=()
+  mapfile -t networks < <(docker network ls --filter "label=${LABEL_FILTER}" -q 2>/dev/null || true)
+  if (( ${#networks[@]} > 0 )); then
+    run_cmd docker network rm "${networks[@]}" 2>/dev/null || true
   fi
 
   log_step "Removing project volumes..."
-  local volumes
-  volumes=$(docker volume ls --filter "label=${LABEL_FILTER}" -q 2>/dev/null || true)
-  if [[ -n "$volumes" ]]; then
-    run_cmd docker volume rm $volumes 2>/dev/null || true
+  local -a volumes=()
+  mapfile -t volumes < <(docker volume ls --filter "label=${LABEL_FILTER}" -q 2>/dev/null || true)
+  if (( ${#volumes[@]} > 0 )); then
+    run_cmd docker volume rm "${volumes[@]}" 2>/dev/null || true
   fi
 
   log_success "Cleanup complete. Run './run.sh start' to restart from scratch."
@@ -694,7 +694,7 @@ cmd_lab() {
       else
         log_warn "Lab index not found: $LAB_INDEX"
         log_info "Listing lab directories:"
-        ls -1 labs/ 2>/dev/null | grep -v "README\|lab-index" | sed 's/^/  /'
+        find labs -mindepth 1 -maxdepth 1 -type d -printf '  %f\n' 2>/dev/null | sort
       fi
       ;;
 

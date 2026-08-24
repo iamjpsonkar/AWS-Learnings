@@ -28,6 +28,9 @@ Utility scripts for maintaining and validating the Cloud-Learnings repository.
 # Validate only
 ./scripts/validate-repo.sh
 
+# Validate portable LF endings for scripts and configuration
+./scripts/validate-repo.sh --line-endings
+
 # Check which topics are missing content
 python3 ./scripts/check-missing-topics.py
 

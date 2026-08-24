@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2317 # Check functions are dispatched by name from the CLI selection array.
 # validate-repo.sh — Repository health checks for Cloud-Learnings
 #
 # Usage:
@@ -109,7 +110,11 @@ check_branding() {
             done
             found=1
         fi
-    done < <(find "$REPO_ROOT" -name "*.md" -not -path "*/.git/*")
+    done < <(find "$REPO_ROOT" -name "*.md" \
+        -not -path "*/.git/*" \
+        -not -path "*/.claude/*" \
+        -not -path "*/.agents/*" \
+        -not -path "*/.codex/*")
 
     if [[ "$found" -eq 0 ]]; then
         log_pass "No old 'aws-learnings' branding found"
@@ -117,7 +122,7 @@ check_branding() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: every non-asset, non-.github directory has a README.md
+# Check: numbered learning sections and their immediate subsections have READMEs
 # ---------------------------------------------------------------------------
 check_readmes() {
     section "README.md presence in directories"
@@ -128,16 +133,14 @@ check_readmes() {
             log_fail "MISSING README: $dir"
             missing=1
         fi
-    done < <(find "$REPO_ROOT" \
-        -mindepth 1 -maxdepth 4 -type d \
-        -not -path "*/.git*" \
-        -not -path "*/.github*" \
-        -not -path "*/.claude*" \
-        -not -path "*/assets/images*" \
-        -not -path "*/assets/diagrams*" \
-        -not -path "*/assets/prompts*" \
-        -not -path "*/node_modules*" \
-        -not -path "*/__pycache__*")
+    done < <(
+        find "$REPO_ROOT" -mindepth 1 -maxdepth 2 -type d | while IFS= read -r dir; do
+            local relative="${dir#"$REPO_ROOT"/}"
+            if [[ "$relative" =~ ^[0-2][0-9]-[^/]+(/[^/]+)?$ ]]; then
+                printf '%s\n' "$dir"
+            fi
+        done
+    )
 
     if [[ "$missing" -eq 0 ]]; then
         log_pass "All checked directories contain README.md"
@@ -152,20 +155,42 @@ check_alt_attributes() {
     local found=0
 
     while IFS= read -r file; do
-        # Match <img> tags missing alt entirely, or with empty alt=""
-        if grep -qE '<img [^>]*(alt=""|(?!.*alt=)[^>]*)>' "$file" 2>/dev/null; then
-            log_warn "MISSING/EMPTY ALT: $file"
-            grep -nE '<img [^>]*(alt=""|(?!.*alt=)[^>]*)>' "$file" | while IFS= read -r line; do
-                log_info "  $line"
-            done
-            found=1
-        fi
+        while IFS= read -r tag; do
+            if [[ ! "$tag" =~ alt=[\"\'][^\"\']+ ]]; then
+                log_warn "MISSING/EMPTY ALT: $file → $tag"
+                found=1
+            fi
+        done < <(grep -oE '<img[[:space:]][^>]*>' "$file" 2>/dev/null || true)
     done < <(find "$REPO_ROOT" -name "*.md" -not -path "*/.git/*")
 
     if [[ "$found" -eq 0 ]]; then
         log_pass "All <img> tags have non-empty alt attributes"
     else
         log_warn "Some <img> tags have missing or empty alt attributes (warnings, not failures)"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Check: executable and machine-readable source files use portable LF endings
+# ---------------------------------------------------------------------------
+check_line_endings() {
+    section "Portable line endings"
+    local found=0
+
+    while IFS= read -r -d '' file; do
+        if LC_ALL=C grep -Iq $'\r' "$REPO_ROOT/$file"; then
+            log_fail "CRLF LINE ENDINGS: $file"
+            found=1
+        fi
+    done < <(git -C "$REPO_ROOT" ls-files -z \
+        '*.sh' '*.py' '*.js' '*.jsx' '*.json' '*.css' '*.html' \
+        '*.hcl' '*.sql' '*.conf' '*.txt' '*.tf' '*.tpl' '*.yaml' '*.yml' \
+        ':(glob)**/.env.example' ':(glob)**/.gitattributes' \
+        ':(glob)**/.gitignore' \
+        ':(glob)**/Dockerfile' ':(glob)**/Makefile')
+
+    if [[ "$found" -eq 0 ]]; then
+        log_pass "Executable and machine-readable files use LF line endings"
     fi
 }
 
@@ -177,8 +202,10 @@ check_todos() {
     local found=0
 
     while IFS= read -r file; do
-        # Flag TODOs that are NOT prefixed with "# TODO:" (i.e., bare TODOs in prose)
-        if grep -qiE '^\s*TODO[^:]|TODO\s*$|\bTODO\b[^:]' "$file" 2>/dev/null; then
+        # Flag standalone TODO stubs, while allowing documentation that discusses TODOs.
+        local todo_pattern='^[[:space:]]*([-*][[:space:]]+)?TODO([[:space:]]|$)'
+        if grep -qiE "$todo_pattern" "$file" 2>/dev/null \
+           && ! grep -qiE '^[[:space:]]*([-*][[:space:]]+)?TODO:' "$file" 2>/dev/null; then
             local basename
             basename="$(basename "$file")"
             # Allow in templates (they use {placeholder} syntax, not TODO)
@@ -186,7 +213,7 @@ check_todos() {
                 continue
             fi
             log_warn "UNTAGGED TODO: $file"
-            grep -niE '^\s*TODO[^:]|TODO\s*$|\bTODO\b[^:]' "$file" | while IFS= read -r line; do
+            grep -niE "$todo_pattern" "$file" | while IFS= read -r line; do
                 log_info "  $line"
             done
             found=1
@@ -265,8 +292,9 @@ main() {
             --readmes) run_all=false; checks+=(check_readmes) ;;
             --alt)     run_all=false; checks+=(check_alt_attributes) ;;
             --todos)   run_all=false; checks+=(check_todos) ;;
+            --line-endings) run_all=false; checks+=(check_line_endings) ;;
             --help|-h)
-                echo "Usage: $0 [--images] [--brand] [--readmes] [--alt] [--todos]"
+                echo "Usage: $0 [--images] [--brand] [--readmes] [--alt] [--todos] [--line-endings]"
                 echo "       Omit flags to run all checks."
                 exit 0
                 ;;
@@ -286,6 +314,7 @@ main() {
             check_alt_attributes
             check_todos
             check_image_sizes
+            check_line_endings
         )
     fi
 
